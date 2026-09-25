@@ -67,5 +67,42 @@ What the baselines show:
 - India is harder than the US on every rule (0.29 vs 0.40), consistent with the transliteration and noise found in
   Stage 0.
 
+## Validation pools: full vs test-like (added in Stage 2)
+
+`splits.pool_mask(pool_uids, eval_s1_uids, mode)` selects the candidate pool for an evaluation:
+- **full:** every S2/S3 record.
+- **testlike:** unmatched distractors plus records whose true S1 is in the evaluated set. Records owned by S1
+  entities outside it (e.g. the train split) are dropped. Every result is now reported on both pools.
+
+Decoy density (records that match no S1, per S1 entity and per source):
+
+| | per S1 |
+|---|---:|
+| train S2 / S3 | 0.61 / 0.61 |
+| test S3 (inferred: 2.93–2.97 records per S1, minus the 1.79 true S3 matches train S1 entities have) | about 1.15 |
+| test-like pool on val (441k S1, all 2.7M distractors kept, both sources) | 6.1 |
+| test-like pool on dev_val (30k S1) | 89 |
+
+Rule baselines on both pools:
+
+| rule | eval set | full pool F0.5 | test-like F0.5 | pairs/S1 full → test-like | singletons correct, full → test-like |
+|---|---|---:|---:|---|---|
+| exact name | dev_val | 0.3552 | 0.4248 | 11.2 → 1.9 | 60.0% → 76.5% |
+| exact name | val | 0.3541 | 0.3957 | 11.0 → 3.5 | 61.5% → 71.7% |
+| name + address prefix | dev_val / val | 0.3047 / 0.3034 | 0.3047 / 0.3034 | 0.49 → 0.49 | ≈100% |
+
+**Caveat for Stage 5 (threshold tuning).** The test-like score depends on the size of the evaluated set. It drops
+same-name records owned by non-evaluated S1 entities, so the smaller the set, the fewer same-name look-alikes
+remain (dev_val 0.425 > val 0.396 > full 0.354 for exact-name). In the test set every S1 is scored and every
+record is present, which is the limit where test-like equals full. So:
+- for predictions without S1-vs-S1 competition, the **full-pool** val score is the unbiased one, and test-like is
+  optimistic;
+- once one-to-one assignment is added, the full pool becomes pessimistic, because owners outside the evaluated
+  set can't claim their records.
+
+The faithful protocol is to score all train S1 entities with out-of-fold models, run one-to-one over all of them,
+and evaluate on val. It becomes possible once Stage 4 has out-of-fold scores. Until then both pools are reported.
+If thresholds are tuned on test-like, it should be the 441k val set, not dev_val.
+
 ## Resources
 `splits.py` 11 s / 0.63 GB · `baselines.py --full` 134 s / 3.08 GB · tests 11 s.

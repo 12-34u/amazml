@@ -106,6 +106,28 @@ def load_split_ids(name: str) -> np.ndarray:
     return sp.uid[masks[name]].to_numpy()
 
 
+POOL_MODES = ("full", "testlike")
+
+
+def pool_mask(pool_uids: np.ndarray, eval_s1_uids: np.ndarray, mode: str) -> np.ndarray:
+    """Which S2/S3 records to keep in the candidate pool when evaluating `eval_s1_uids`.
+
+    full      every record (the pool the rest of train leaves behind: records owned by
+              non-evaluated S1 entities stay as extra, unclaimable look-alikes)
+    testlike  unmatched distractors, plus records whose true S1 is in the evaluated set.
+              Records owned by S1 entities outside the evaluated set (e.g. the train split)
+              are dropped. In the test set every S1 is scored, so those records would
+              have a competing owner rather than being free decoys.
+    """
+    if mode == "full":
+        return np.ones(len(pool_uids), dtype=bool)
+    if mode != "testlike":
+        raise ValueError(f"unknown pool mode {mode!r}")
+    truth = load_truth(["s1_uid", "m_uid"])
+    owned_elsewhere = truth.m_uid[~truth.s1_uid.isin(eval_s1_uids)]
+    return ~np.isin(pool_uids, owned_elsewhere.to_numpy())
+
+
 def split_summary() -> pd.DataFrame:
     sp = load_splits()
     rows = []
