@@ -1,0 +1,13 @@
+timestamp	stage	seconds	peak_rss_gb
+2026-09-25 14:43:13	prepare	150.6	2.38
+2026-09-25 14:44:50	dev_subset	1.3	1.11
+2026-09-25 14:45:03	eda_counts_labels	12.2	1.26
+2026-09-25 14:45:34	eda_noise	31.8	2.59
+2026-09-25 14:48:39	prepare	151.0	2.45
+2026-09-25 14:48:41	dev_subset	1.3	1.13
+2026-09-25 14:48:55	eda_counts_labels	12.9	1.25
+2026-09-25 14:49:26	eda_noise	31.4	2.47
+2026-09-25 14:50:14	eda_name_frequency	48.4	2.47
+2026-09-25 14:50:44	eda_examples_hard_negatives	30.0	3.03
+2026-09-25 14:52:28	eda_examples_hard_negatives	55.2	3.62
+2026-09-25 19:48:26	eda_candidate_budget	2.9	0.73
