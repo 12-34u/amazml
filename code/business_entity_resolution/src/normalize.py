@@ -38,3 +38,13 @@ def hash_key(arr: pa.Array | pa.ChunkedArray, chunk: int = 1_000_000) -> np.ndar
         out[i:i + chunk] = pd.util.hash_pandas_object(s, index=False).to_numpy()
     out[pc.equal(arr, "").to_numpy(zero_copy_only=False)] = 0
     return out.view(np.int64)
+
+
+ADDR_PREFIX_RE = r"(\d+\s+[^\s\d]+)"  # first "house number + next word", e.g. "994 miller"
+
+
+def addr_prefix_hash(addr_key: pd.Series) -> np.ndarray:
+    """Hash of the first number+word in a normalised address (0 when there is none).
+    Survives component reordering ("Crossville, 994 Miller Ave" vs "994 MILLER AVENUE")."""
+    pref = addr_key.str.extract(ADDR_PREFIX_RE, expand=False).fillna("")
+    return hash_key(pa.array(pref, type=pa.string()))

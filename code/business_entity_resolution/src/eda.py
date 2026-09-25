@@ -14,6 +14,7 @@ from rapidfuzz import fuzz, process
 
 from data import NOTES_DIR, load, load_others, load_truth
 from memtrack import stage
+from normalize import addr_prefix_hash
 from prepare import UID_BASE
 
 SPLITS = {"train": (1, 2, 3), "test": (1, 2, 3)}
@@ -250,18 +251,6 @@ def example_groups(n_per_country: int = 9, n_singletons: int = 2, seed: int = 7)
         m = tr.m_uid[tr.s1_uid == u]
         groups.append({"s1": s1.loc[u].to_dict(), "matches": oth.loc[m].to_dict("records")})
     return groups
-
-
-ADDR_PREFIX_RE = r"(\d+\s+[^\s\d]+)"  # first "house number + next word", e.g. "994 miller"
-
-
-def addr_prefix_hash(addr_key: pd.Series) -> np.ndarray:
-    """Hash of the first number+word in a normalised address (0 when there is none).
-    Survives component reordering ("Crossville, 994 Miller Ave" vs "994 MILLER AVENUE")."""
-    import pyarrow as pa
-    from normalize import hash_key
-    pref = addr_key.str.extract(ADDR_PREFIX_RE, expand=False).fillna("")
-    return hash_key(pa.array(pref, type=pa.string()))
 
 
 def hard_negatives(sample_n: int = 50_000, name_cap: int = 50, lookalike_min_name: float = 80,
