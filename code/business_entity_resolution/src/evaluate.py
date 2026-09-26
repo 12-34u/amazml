@@ -133,7 +133,7 @@ def read_id_list_tsv(path) -> pd.DataFrame:
     keep = pc.not_equal(flat, "")
     pairs = pd.DataFrame({"s1": pc.filter(s1, keep).to_numpy(zero_copy_only=False),
                           "m": pc.filter(flat, keep).to_numpy(zero_copy_only=False)})
-    pairs.attrs["s1_rows"] = t[s1col].to_numpy(zero_copy_only=False)
+    pairs.attrs["s1_rows"] = t[s1col].to_pylist()   # a list, not ndarray: pandas compares attrs on merge
     return pairs
 
 

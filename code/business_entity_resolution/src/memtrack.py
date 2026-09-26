@@ -42,3 +42,58 @@ def stage(name: str, log: bool = True):
             if new:
                 f.write("timestamp\tstage\tseconds\tpeak_rss_gb\n")
             f.write(f"{dt.datetime.now():%Y-%m-%d %H:%M:%S}\t{name}\t{secs:.1f}\t{peak:.2f}\n")
+
+
+class BudgetExceeded(RuntimeError):
+    pass
+
+
+def check_budget(limit_gb: float = BUDGET_GB - 0.5, where: str = "") -> None:
+    """Abort cleanly (instead of being OOM-killed) when this process nears the budget."""
+    rss = current_rss_gb()
+    if rss > limit_gb:
+        raise BudgetExceeded(f"RSS {rss:.2f} GB > {limit_gb:.2f} GB at {where}")
+
+
+class PeakSampler:
+    """Background thread sampling RSS every 50 ms and attributing each peak to the phase
+    most recently announced with `phase(name)`. Catches transient spikes that checkpoint
+    prints miss. Usage: with PeakSampler() as ps: ...; ps.phase("x"); ...; print(ps.report())"""
+
+    def __init__(self, interval: float = 0.05):
+        import threading
+        self.interval, self.cur, self.peaks = interval, "start", {}
+        self._stop = threading.Event()
+        self._t = threading.Thread(target=self._run, daemon=True)
+
+    def _run(self):
+        while not self._stop.is_set():
+            v = current_rss_gb()
+            if v > self.peaks.get(self.cur, 0.0):
+                self.peaks[self.cur] = v
+            self._stop.wait(self.interval)
+
+    def phase(self, name: str) -> None:
+        self.cur = name
+
+    def __enter__(self):
+        self._t.start()
+        _ACTIVE.append(self)
+        return self
+
+    def __exit__(self, *exc):
+        self._stop.set()
+        self._t.join()
+        _ACTIVE.remove(self)
+
+    def report(self) -> str:
+        return " | ".join(f"{k} {v:.2f}" for k, v in self.peaks.items())
+
+
+_ACTIVE: list = []
+
+
+def phase(name: str) -> None:
+    """Announce the current phase to any active PeakSampler (no-op otherwise)."""
+    for s in _ACTIVE:
+        s.phase(name)

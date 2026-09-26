@@ -296,12 +296,13 @@ def apply_lexicon(x, rows: np.ndarray, lexicon: pa.Table | None):
     if lexicon is None or not rows.any():
         return x
     x = _chunked(x)
+    src, dst = (pc.cast(_chunked(lexicon[c]), pa.string()) for c in ("src", "dst"))   # tables built from pandas are large_string
     n = len(x)
     toks = pc.split_pattern(x, " ")
     flat, parents = pc.list_flatten(toks), _np(pc.list_parent_indices(toks))
-    idx = pc.index_in(flat, value_set=lexicon["src"])
+    idx = pc.index_in(flat, value_set=src)
     use = pa.array(rows[parents]) if len(parents) else pa.array([], pa.bool_())
-    new = pc.if_else(pc.and_(use, pc.is_valid(idx)), pc.take(lexicon["dst"], idx), flat)
+    new = pc.if_else(pc.and_(use, pc.is_valid(idx)), pc.take(dst, idx), flat)
     return _rebuild(new, parents, n)
 
 
