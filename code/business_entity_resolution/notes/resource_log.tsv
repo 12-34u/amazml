@@ -98,3 +98,4 @@ timestamp	stage	seconds	peak_rss_gb
 2026-09-26 18:36:27	holdout_score_India	59.3	3.62
 2026-09-26 18:39:22	holdout_train_India	165.9	4.20
 2026-09-26 18:42:02	holdout_score_US	160.1	4.20
+2026-09-27 01:55:52	prepare	40.5	2.21
