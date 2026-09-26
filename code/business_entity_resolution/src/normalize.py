@@ -273,6 +273,24 @@ def split_legal(x, n: int) -> tuple[pa.Array, pa.Array, pa.Array]:
     return core, legal, titles
 
 
+_SKELETON_RULES = [(r"x", "ks"), (r"ph", "f"), (r"sh", "s"), (r"ch", "c"), (r"c([eiy])", r"s\1"), (r"c", "k"),
+                   (r"q", "k"), (r"g([eiy])", r"j\1"), (r"w", "v"), (r"z", "j"), (r"[aeiouy]", "")]
+
+
+def consonant_skeleton(arr) -> pa.Array:
+    """Spelling-robust key for transliterated words: soft c/g, x->ks, ph->f, sh->s, w->v,
+    z->j, vowels dropped, doubled consonants collapsed. 'stors'/'stores' -> 'strs',
+    'jvelars'/'jewellers' -> 'jvlrs', 'medikals'/'medicals' -> 'mdkls'.
+    Used as a matching FEATURE, not to rewrite names: as a rewrite rule it mapped ~27% of
+    test-only words to the wrong English word (e.g. 'myanej' -> 'manoj'), creating false overlaps."""
+    x = pc.utf8_lower(_chunked(pa.array(arr, pa.string()) if not isinstance(arr, (pa.Array, pa.ChunkedArray)) else arr))
+    for pat, rep in _SKELETON_RULES:
+        x = _sub(x, pat, rep)
+    for ch in "bcdfghjklmnpqrstvwxz":
+        x = _sub(x, f"{ch}{ch}+", ch)
+    return x
+
+
 def apply_lexicon(x, rows: np.ndarray, lexicon: pa.Table | None):
     """Replace tokens by their learned English spelling on the selected rows (Indic-origin names)."""
     if lexicon is None or not rows.any():
@@ -340,10 +358,21 @@ STREET_TYPES = ("road|street|avenue|boulevard|drive|lane|court|place|circle|high
                 "square|expressway|way|marg|rue|chemin|impasse|allee|route|quai|cours|faubourg")
 
 
+# Unambiguous street-type abbreviations that may also START a component ("Av Willy Brandt").
+LEADING_ABBREV = [("avenue", r"av|ave"), ("boulevard", r"bd|blvd"), ("route", r"rte"), ("impasse", r"imp")]
+
+
 def expand_address_abbreviations(x):
     """Expand an abbreviation only when a word precedes it in the same component
     ("hayes st" -> "hayes street"). A component that is just "MT" or "CT" is a state
-    code, not "mount"/"court", and stays as it is."""
+    code, not "mount"/"court", and stays as it is. French specifics: 'bis'/'ter' after a
+    house number are dropped ("23 bis r ledru rollin"), a lone 'r' right after a house
+    number is 'rue' ("24 r jean jaures"), and a few unambiguous abbreviations are also
+    expanded at the start of a component."""
+    x = _sub(x, r"\b(\d+)\s+(?:bis|ter)\s+", r"\1 ")
+    x = _sub(x, r"\b(\d+[a-z]?\s+)r\b", r"\1rue")
+    for full, abbr in LEADING_ABBREV:
+        x = _sub(x, rf"(^|,\s)(?:{abbr})\s+(\p{{L}})", rf"\1{full} \2")
     for full, abbr in ADDR_ABBREV:
         x = _sub(x, rf"([\p{{L}}\p{{N}}]\s+)(?:{abbr})\b", rf"\1{full}")
     return x

@@ -93,6 +93,11 @@ def test_lexicon_maps_transliterated_tokens():
     ("A-303, MARATHON CHAMBERS, MUMBAI, Maharashtra", "303", "marathon chambers", ""),
     ("73rd Street, Minot, North Dakota", "", "street", ""),
     ("Prashil Park, Block No. 92, Near Saurashtra University, Kalawad Road, Rajkot", "92", "kalawad road", ""),
+    ("24 R Jean Jaurès, Nantes, Pays de la Loire", "24", "rue jean jaures", ""),
+    ("23 Bis R Ledru Rollin, Nantes, Loire-Atlantique", "23", "rue ledru rollin", ""),
+    ("N°56 R. De L'yser, Tourcoing, Hauts-de-France", "56", "rue de l yser", ""),
+    ("Av Willy Brandt, Lille", "", "avenue willy brandt", ""),
+    ("S R Layout, 12 MG Road, Bangalore", "12", "mg road", ""),
 ])
 def test_address_parts(raw, house, street, postcode):
     r = addresses([raw])[0]
@@ -128,3 +133,9 @@ def test_city_region_localities():
     assert g["city"].to_pylist() == ["howrah", "columbus"]
     assert g["region"].to_pylist() == ["west bengal", "oh"]
     assert g["localities"].to_pylist() == ["howrah|kolkata", "columbus"]   # house-number component excluded
+
+
+def test_consonant_skeleton():
+    from normalize import consonant_skeleton
+    got = consonant_skeleton(["stors", "stores", "jvelars", "jewellers", "medikals", "medicals", "laksmi", "lakshmi"]).to_pylist()
+    assert got[0] == got[1] == "strs" and got[2] == got[3] and got[4] == got[5] == "mdkls" and got[6] == got[7]

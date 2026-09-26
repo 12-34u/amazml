@@ -51,7 +51,7 @@ Val-split S1 entities only. The lexicon and region map were learned on the train
 
 |                            |   pairs |   house_no: both present |   house_no: equal | present |   street_word: both present |   street_word: equal | present |   city: both present |   city: equal | present |   region: both present |   region: equal | present |   postcode: both present |   postcode: equal | present |
 |:---------------------------|--------:|-------------------------:|----------------------------:|----------------------------:|-------------------------------:|---------------------:|------------------------:|-----------------------:|--------------------------:|-------------------------:|----------------------------:|
-| ('India', 'same_building') |   32551 |                    0.98  |                       0.579 |                       0.904 |                          0.803 |                0.991 |                   0.204 |                  0.781 |                     0.499 |                    0     |                       0     |
+| ('India', 'same_building') |   32551 |                    0.98  |                       0.579 |                       0.904 |                          0.801 |                0.991 |                   0.204 |                  0.781 |                     0.499 |                    0     |                       0     |
 | ('India', 'same_name')     |   34155 |                    0.773 |                       0.011 |                       0.709 |                          0.005 |                0.953 |                   0.04  |                  0.797 |                     0.127 |                    0     |                       0     |
 | ('India', 'true')          |   29184 |                    0.826 |                       0.776 |                       0.784 |                          0.696 |                0.972 |                   0.646 |                  0.874 |                     0.993 |                    0     |                       1     |
 | ('US', 'same_building')    |   27449 |                    0.99  |                       0.782 |                       0.98  |                          0.963 |                0.976 |                   0.337 |                  0.995 |                     0.495 |                    0.001 |                       0.526 |
@@ -63,9 +63,9 @@ Val-split S1 entities only. The lexicon and region map were learned on the train
 | rule       |   pairs |   precision |   recall_of_val_pairs |   wrong_pairs |
 |:-----------|--------:|------------:|----------------------:|--------------:|
 | stage1     |  211460 |     0.99982 |               0.13841 |            38 |
-| core+hs    |  523254 |     0.99309 |               0.34018 |          3618 |
-| core+hs+lf |  498446 |     0.99795 |               0.32564 |          1023 |
-| norm+hs    |  297251 |     0.99952 |               0.1945  |           144 |
+| core+hs    |  523260 |     0.99308 |               0.34018 |          3619 |
+| core+hs+lf |  498450 |     0.99795 |               0.32564 |          1023 |
+| norm+hs    |  297252 |     0.99952 |               0.1945  |           144 |
 
 ## Examples: Latin true pairs whose name similarity dropped by more than 15
 

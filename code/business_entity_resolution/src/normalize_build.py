@@ -10,12 +10,18 @@ Steps (each cached in artifacts/, skipped when present unless --force):
                                usually the last component (normalize.REGION_*)
      region_map.parquet        region spelling -> S1 spelling, learned from train-split true pairs
   5. geo pass                  adds city, region and localities to every norm file (from addr_norm)
+  6. region_compat.parquet     label-free region hierarchy: region A is compatible with B when
+                               >= 80% of A's records sit in cities that also occur with B
+                               (French departments inside regions: gironde -> nouvelle aquitaine)
 
-Only train-split labels (splits.parquet) are used for learning, so val stays clean.
-Unlabelled text (all sources, both splits) is used for component frequencies. That is
-the provided data, not external data.
+Validation mode (default) learns the lexicon and region map from train-split labels only,
+so val stays clean. Final mode (--final, for the test-set run) re-learns both from ALL
+train labels (*_final.parquet) and re-normalises the test files with them. The region
+list itself is label-free: component frequencies over all sources, which is the provided
+data, not external data.
 
-Usage:  python src/normalize_build.py [--force] [--from-step N]
+Usage:  python src/normalize_build.py [--force] [--from-step N]      validation resources, all files
+        python src/normalize_build.py --final                        then: final resources, test files
 """
 from __future__ import annotations
 
@@ -41,8 +47,11 @@ CACHE_PATH = ARTIFACTS_DIR / "translit_cache.parquet"
 LEXICON_PATH = ARTIFACTS_DIR / "translit_lexicon.parquet"
 REGIONS_PATH = ARTIFACTS_DIR / "regions.parquet"
 REGION_MAP_PATH = ARTIFACTS_DIR / "region_map.parquet"
+REGION_COMPAT_PATH = ARTIFACTS_DIR / "region_compat.parquet"
+COMPAT_MIN_CONTAINMENT, COMPAT_MIN_CITY_RECORDS = 0.8, 20
 MAP_MIN_COUNT, MAP_MIN_SHARE = 20, 0.8
 LEX_MIN_COUNT, LEX_MIN_SHARE = 3, 0.6
+
 _SHARED: dict = {}  # resources inherited by forked workers
 
 
@@ -63,11 +72,22 @@ def _iter_chunks(split, source, columns):
         yield pa.Table.from_batches([batch])
 
 
-def _train_split_truth() -> pd.DataFrame:
+def _learning_truth(final: bool = False) -> pd.DataFrame:
+    """Labels used for learning: the train split (validation mode) or all train data (final mode)."""
+    tr = load_truth(["s1_uid", "m_uid"])
+    if final:
+        return tr
     from splits import load_splits
     sp = load_splits()
-    tr = load_truth(["s1_uid", "m_uid"])
     return tr[tr.s1_uid.isin(sp.uid[sp.split == "train"])]
+
+
+def _lexicon_path(final: bool):
+    return LEXICON_PATH.with_name("translit_lexicon_final.parquet") if final else LEXICON_PATH
+
+
+def _region_map_path(final: bool):
+    return REGION_MAP_PATH.with_name("region_map_final.parquet") if final else REGION_MAP_PATH
 
 
 # ---------------------------------------------------------------- 1. transliteration cache
@@ -106,8 +126,8 @@ def load_cache() -> pa.Table:
 
 
 # ---------------------------------------------------------------- 2. lexicon
-def build_lexicon(cache: pa.Table) -> None:
-    tr = _train_split_truth()
+def build_lexicon(cache: pa.Table, final: bool = False) -> None:
+    tr = _learning_truth(final)
     parts = []
     for s in (2, 3):
         o = load("train", s, ["uid", "business_name"])
@@ -131,13 +151,13 @@ def build_lexicon(cache: pa.Table) -> None:
     tot = cnt.groupby("src").n.transform("sum")
     lex = cnt[(cnt.n >= LEX_MIN_COUNT) & (cnt.n / tot >= LEX_MIN_SHARE) & (cnt.src != cnt.dst)]
     lex = lex.sort_values("n", ascending=False).drop_duplicates("src")
-    lex.to_parquet(LEXICON_PATH, index=False)
+    lex.to_parquet(_lexicon_path(final), index=False)
     print(f"  aligned Indic true pairs: {int(same.sum()):,} of {len(same):,}; lexicon entries: {len(lex):,}; top:",
           lex.head(12)[["src", "dst"]].values.tolist())
 
 
-def load_lexicon() -> pa.Table:
-    lex = pd.read_parquet(LEXICON_PATH)
+def load_lexicon(final: bool = False) -> pa.Table:
+    lex = pd.read_parquet(_lexicon_path(final))
     return pa.table({"src": lex.src.tolist(), "dst": lex.dst.tolist()})
 
 
@@ -185,11 +205,15 @@ def build_regions() -> None:
     reg = cnt[(cnt.share >= REGION_MIN_SHARE) & (cnt.last_ratio >= REGION_MIN_LAST_RATIO)]
     reg.sort_values(["country", "n"], ascending=[True, False]).to_parquet(REGIONS_PATH, index=False)
     print("  region-level components per country:", reg.groupby("country").size().to_dict())
+    build_region_map(final=False)
 
-    # spelling map: the region a candidate writes -> the region its true S1 writes
+
+def build_region_map(final: bool = False) -> None:
+    """Spelling map: the region a candidate writes -> the region its true S1 writes."""
+    reg = pd.read_parquet(REGIONS_PATH)
     unmapped = {"region_keys": pa.array((reg.country.str.lower() + "|" + reg.comp).tolist(), pa.string()),
                 "region_map": pa.table({"src": pa.array([], pa.string()), "dst": pa.array([], pa.string())})}
-    tr = _train_split_truth()
+    tr = _learning_truth(final)
     region_of = {}
     for s in (1, 2, 3):
         uids = tr.s1_uid if s == 1 else tr.m_uid
@@ -208,12 +232,12 @@ def build_regions() -> None:
     m = pairs.value_counts().rename("n").reset_index()
     tot = m.groupby(["country", "cand"]).n.transform("sum")
     m = m[(m.n >= MAP_MIN_COUNT) & (m.n / tot >= MAP_MIN_SHARE) & (m.cand != m.dst)]
-    m.to_parquet(REGION_MAP_PATH, index=False)
+    m.to_parquet(_region_map_path(final), index=False)
     print(f"  region spelling map: {len(m):,} entries, e.g.", m.sort_values("n", ascending=False).head(10)[["cand", "dst"]].values.tolist())
 
 
-def load_regions() -> dict:
-    reg, mp_ = pd.read_parquet(REGIONS_PATH), pd.read_parquet(REGION_MAP_PATH)
+def load_regions(final: bool = False) -> dict:
+    reg, mp_ = pd.read_parquet(REGIONS_PATH), pd.read_parquet(_region_map_path(final))
     return {"region_keys": pa.array((reg.country.str.lower() + "|" + reg.comp).tolist(), pa.string()),
             "region_map": pa.table({"src": (mp_.country.str.lower() + "|" + mp_.cand).tolist(), "dst": mp_.dst.tolist()})}
 
@@ -244,6 +268,86 @@ def _geo_worker(file):
     add_city_region(*file, _SHARED["regions"])
 
 
+# ---------------------------------------------------------------- 6. region hierarchy
+def build_region_compat() -> None:
+    """Directional containment between region labels via shared cities, over all sources and
+    both splits (no labels). A city 'links' A to B when it occurs with B at least 20 times;
+    A -> B is compatible when >= 80% of A's region-tagged records are in such cities.
+    Stored both ways (A,B) and (B,A) for lookup."""
+    parts = []
+    for split, s in _files():
+        n = load_norm(split, s, ["region", "city"])
+        c = load(split, s, ["country"]).country.astype(str).values
+        d = pd.DataFrame({"country": c, "region": n.region.values, "city": n.city.values})
+        parts.append(d[(d.region != "") & (d.city != "")].value_counts().rename("n").reset_index())
+    co = pd.concat(parts).groupby(["country", "city", "region"], as_index=False).n.sum()
+    rows = []
+    for country, g in co.groupby("country"):
+        totals = g.groupby("region").n.sum()
+        strong = g[g.n >= COMPAT_MIN_CITY_RECORDS]
+        cities_of = strong.groupby("region").city.apply(set)
+        for a, na in totals.items():
+            ga = g[g.region == a]
+            for b, cb in cities_of.items():
+                if a == b:
+                    continue
+                share = ga.n[ga.city.isin(cb)].sum() / na
+                if share >= COMPAT_MIN_CONTAINMENT:
+                    rows.append({"country": country, "region_a": a, "region_b": b, "containment": share})
+    m = pd.DataFrame(rows, columns=["country", "region_a", "region_b", "containment"])
+    both = pd.concat([m, m.rename(columns={"region_a": "region_b", "region_b": "region_a"})]).drop_duplicates(
+        ["country", "region_a", "region_b"])
+    both.to_parquet(REGION_COMPAT_PATH, index=False)
+    print(f"  region hierarchy links: {len(m)} directional, e.g.", m.sort_values("containment", ascending=False)
+          .head(8)[["country", "region_a", "region_b"]].values.tolist())
+
+
+# ---------------------------------------------------------------- unknown Indic tokens
+def indic_token_coverage(split: str, sources=(2, 3), uids=None) -> dict:
+    """Among names written in an Indic script: the share of tokens (after transliteration
+    and lexicon) that are not English vocabulary, where the vocabulary is every token of
+    the Latin S1 names (train + test). Also the share of names with at least one such token."""
+    vocab = pa.concat_arrays([pc.unique(pc.list_flatten(pc.split_pattern(
+        pa.array(load_norm(sp, 1, ["name_norm"]).name_norm, pa.string()), " "))) for sp in ("train", "test")])
+    vocab = pc.unique(vocab)
+    tot_tok = unk_tok = names = names_unk = 0
+    for s in sources:
+        if not norm_path(split, s).exists():      # test S2 may be absent
+            continue
+        d = load_norm(split, s, ["uid", "name_script", "name_norm"])
+        d = d[d.name_script.astype(str).isin(["devanagari", "bengali", "gurmukhi", "gujarati", "oriya", "tamil",
+                                               "telugu", "kannada", "malayalam"])]
+        if uids is not None:
+            d = d[d.uid.isin(uids)]
+        toks = pc.split_pattern(pa.array(d.name_norm, pa.string()), " ")
+        flat, par = pc.list_flatten(toks), _np(pc.list_parent_indices(toks))
+        unk = ~_np(pc.is_in(flat, value_set=vocab))
+        tot_tok += len(flat)
+        unk_tok += int(unk.sum())
+        names += len(d)
+        names_unk += len(np.unique(par[unk]))
+    return {"indic_names": names, "tokens": tot_tok, "unknown_token_share": unk_tok / max(tot_tok, 1),
+            "names_with_unknown_share": names_unk / max(names, 1)}
+
+
+def final_main() -> None:
+    """Final-pipeline resources from ALL train labels; re-normalise the test files with them."""
+    cache = load_cache()
+    with stage("normalize_final_lexicon_regionmap"):
+        build_lexicon(cache, final=True)
+        build_region_map(final=True)
+    _SHARED.update(cache=cache, lexicon=load_lexicon(final=True), regions=load_regions(final=True))
+    test_files = [f for f in _files() if f[0] == "test"]
+    with stage("normalize_final_test_files"):
+        for f in test_files:                      # sequential: disk is tight
+            _normalize_worker(f)
+            _geo_worker(f)
+    with stage("normalize_final_region_compat"):
+        build_region_compat()
+    with stage("normalize_final_indic_coverage"):
+        print("  test S2/S3, final lexicon:", indic_token_coverage("test"))
+
+
 def main(force: bool = False, from_step: int = 1) -> None:
     f = lambda step: force or from_step <= step
     with stage("normalize_1_translit_cache"):
@@ -267,11 +371,14 @@ def main(force: bool = False, from_step: int = 1) -> None:
         # sequential: each rewrite needs a temp copy and free disk is tight
         for x in _files():
             _geo_worker(x)
+    with stage("normalize_6_region_compat"):
+        build_region_compat()
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--force", action="store_true")
     ap.add_argument("--from-step", type=int, default=99, help="rebuild this step and every later one")
+    ap.add_argument("--final", action="store_true", help="final-pipeline resources from all train labels; re-normalise test")
     a = ap.parse_args()
-    main(a.force, a.from_step)
+    final_main() if a.final else main(a.force, a.from_step)

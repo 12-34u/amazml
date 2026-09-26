@@ -114,3 +114,68 @@ decoys through (LLC vs LTD), so the core-name variants are features, not certain
 - The report takes 107 s at 3.9 GB. Tests take 7 s.
 - Artifacts add 2.2 GB of norm files. **Only about 4 GB of disk is free**, so rewrites stream through one temp file
   at a time.
+
+## Final-pipeline resources (`python src/normalize_build.py --final`)
+- **Validation mode** (the default) learns the lexicon and region map from **train-split** labels, and every
+  validation number uses these.
+- **Final mode** re-learns both from **all** train labels (`translit_lexicon_final.parquet`,
+  `region_map_final.parquet`) and re-normalises the test files with them. It uses 524k aligned Indic pairs, up
+  from 419k.
+- The region list and the region hierarchy are label-free and shared by both modes.
+
+### Unknown Indic tokens
+An unknown token is one in an Indic-script name that, after transliteration and the lexicon, is not a word of any
+S1 name.
+
+| set | lexicon | Indic-script names | unknown tokens | names with ≥ 1 unknown |
+|---|---|---:|---:|---:|
+| val-owned train S2/S3 | train split | 110,384 | 1.5% | 5.1% |
+| test S3 | train split | 320,639 | 4.6% | 17.3% |
+| test S3 | **all train (final)** | 320,639 | **4.6%** | **17.3%** |
+
+- The final lexicon doesn't change the test rate. The unknown tokens are **123 word types of test-only business
+  vocabulary**: laksmi, stors, tredars, motars, medikals, bekri, janral, jvelars, otomobails, ilektroniks,
+  restorent… These English words simply don't occur in any training name, so no train-learned lexicon can cover
+  them.
+- **Tried and rejected, a consonant-skeleton rewrite.** It matches an unknown token to a same-country S1 word
+  with the same skeleton ('stors'/'stores' → `strs`). It halved the unknown rate (4.6% → 2.4%), but about 27%
+  of its mappings were wrong (myanej→manoj, farmesi→frames, entar→nature, ments→moments). A wrong English
+  word creates false name overlaps, which costs precision; an unknown token only costs some recall, and
+  character n-grams still partly match "laksmi stors" to "lakshmi stores". `consonant_skeleton` is kept for a
+  Stage 4 **feature**, where the model decides how much to trust it.
+- **Tried and rejected, an address-anchored lexicon on test data** (unlabelled): Indic S3 names aligned with the
+  single S1 at the same house number + street word. It gave only 5 entries, because too few anchored pairs
+  contain these words.
+
+## France check (test, never seen in training) — see [france_check.md](france_check.md)
+Field coverage on test (share of rows):
+
+| source / country | legal form | house no. | street | city | region | postcode |
+|---|---:|---:|---:|---:|---:|---:|
+| S1 France | 67% | 99.5% | 99.8% | 100% | 100% | 0.1% |
+| S3 France | 60% | 92.9% | 95.6% | 97.1% | 65.9% | 0.2% |
+| S1 US / India | 56% / 84% | 98.7% / 88.5% | 99.4% / 85.3% | 99% / 99.9% | 99.7% / 86.3% | ≈0 |
+
+- **Legal forms:** SARL, SAS, SASU, SA, EURL and SCI are extracted anywhere in the name ("SARL Spartiate
+  Jeunes", "Bordeaux Sport France SAS").
+- **Names:** accents fold ("Mérignac Collège" → "merignac college"); `@handles` lose the `@`.
+- **Addresses:** "N°56" → 56 and "011" → 11. Three fixes came out of this check (re-tested; 58 tests pass):
+  - a lone "R"/"R." after a house number becomes **rue** ("24 R Jean Jaurès" → "rue jean jaures");
+  - "bis"/"ter" after a house number are dropped ("23 Bis R Ledru Rollin" → 23, "rue ledru rollin");
+  - av/ave/bd/blvd/rte/imp are expanded at the start of a component ("Av Willy Brandt" → "avenue willy brandt").
+    The preceding-word rule still protects state codes such as MT/CT, and "S R Layout" is not turned into "rue".
+- **Regions: S1 France always gives the region; 31% of S3 France rows give the *department* instead**
+  (Gironde, Nord, Loire-Atlantique, Pas-de-Calais), and 34% give none. A plain "region mismatch" feature
+  learned on US/India, where true pairs agree 99% of the time, would punish French true pairs.
+
+### Region hierarchy (`artifacts/region_compat.parquet`, label-free)
+Region A is compatible with B when ≥ 80% of A's records are in cities that also occur with B at least 20 times,
+counted over all sources and both splits. It learns exactly the right links and nothing else:
+- **France:** Gironde ⊂ Nouvelle-Aquitaine, Loire-Atlantique ⊂ Pays de la Loire, Nord ⊂ Hauts-de-France,
+  Pas-de-Calais ⊂ Hauts-de-France;
+- **India:** dl ↔ dilli (Delhi's code and its Hindi transliteration), Telangana ↔ Andhra Pradesh (the 2014
+  split, visible in the training pairs);
+- **US:** none. Shared city names like Springfield don't link states, because containment is directional and
+  needs ≥ 80%.
+
+Stage 4 will use *region compatible* (equal, or linked, or one side missing) instead of *region equal*.
